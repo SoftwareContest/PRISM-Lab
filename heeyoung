@@ -1,0 +1,57 @@
+import mne
+import matplotlib.pyplot as plt
+from mne.decoding import CSP
+from mne.preprocessing import ICA
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split,GridSearchCV
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+
+
+#데이터 로드
+vhdr_path = "C:/Users/mimi0/OneDrive/바탕 화면/PD/PD1681.vhdr"
+raw=mne.io.read_raw_brainvision(vhdr_path,preload=True)
+
+#데이터 전처리
+raw.filter(l_freq=1.0, h_freq=40.0)
+print(raw.info['highpass'])  # 현재 하이패스 필터 값 확인
+raw.filter(l_freq=1.0, h_freq=None)  # 1Hz 이상의 신호만 유지
+raw.set_channel_types({'Resp': 'eeg'})
+raw_clean=raw.copy().notch_filter(freqs=50)#50Hz 아티팩트 제거
+events, event_id=mne.events_from_annotations(raw)
+epochs=mne.Epochs(raw,events,event_id,tmin=-0.2,tmax=0.5)
+raw_clean.plot()
+plt.show()
+ica = ICA(n_components=20, random_state=97, max_iter=800)
+ica.fit(raw_clean)
+ica.plot_components()
+plt.show()
+print(raw.info)
+
+#csp 특징 추출
+csp=CSP(n_components=4, reg=None, log=True, norm_trace=False)
+x=csp.fit_transform(epochs.get_data(),epochs.events[:,2])
+
+#분류기 선택
+X_train, X_test, y_train, y_test= train_test_split(X, epochs.events[:,2], test_size=0.2,random_state=42)
+
+#SVM 분류기
+clf=SVC(kernel='linear')
+clf.fit(X_train, y_train)
+
+#예측 및 정확도 평가
+y_pred=clf.predict(X_test)
+accuracy=accuracy_score(y_test,y_pred)
+print(f"Accuracy: {accuracy*100:.2f}%")
+
+# 혼동 행렬 출력
+print(confusion_matrix(y_test, y_pred))
+
+# 분류 리포트 출력
+print(classification_report(y_test, y_pred))
+
+# SVM 하이퍼파라미터 그리드 서치
+param_grid = {'C': [1, 10, 100], 'kernel': ['linear', 'rbf']}
+grid_search = GridSearchCV(SVC(), param_grid, cv=5)
+grid_search.fit(X_train, y_train)
+
+print(f"Best parameters: {grid_search.best_params_}")
