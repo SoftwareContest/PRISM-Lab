@@ -1,0 +1,41 @@
+import numpy as np
+import os
+
+X_PATH = "C:/Users/mimi0/OneDrive/바탕 화면/processed_data_segment_fbcsp/X_segments_fbcsp.npy"
+y_PATH = "C:/Users/mimi0/OneDrive/바탕 화면/processed_data_segment_fbcsp/y_segments_fbcsp.npy"
+NPZ_PATH = "C:/Users/mimi0/OneDrive/바탕 화면/cv save.npz"
+SAVE_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/fold_segment_fbcsp"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+X = np.load(X_PATH, allow_pickle=True)
+y = np.load(y_PATH)
+split = np.load(NPZ_PATH)
+
+subjects = split["subjects"]
+labels = split["labels"]
+
+n_subjects = len(subjects)
+segments_per_subject = len(X) // n_subjects  # 각 subject당 segment 수
+
+for fold in range(5):
+    train_idx = split[f"train_{fold}"]
+    test_idx = split[f"test_{fold}"]
+
+    def get_segments(idxs):
+        segs, labs = [], []
+        for subj_idx in idxs:
+            start = subj_idx * segments_per_subject
+            end = start + segments_per_subject
+            segs.append(X[start:end])
+            labs.append(y[start:end])
+        return np.concatenate(segs), np.concatenate(labs)
+
+    X_train, y_train = get_segments(train_idx)
+    X_test, y_test = get_segments(test_idx)
+
+    np.save(os.path.join(SAVE_DIR, f"X_train_fold{fold}.npy"), X_train)
+    np.save(os.path.join(SAVE_DIR, f"y_train_fold{fold}.npy"), y_train)
+    np.save(os.path.join(SAVE_DIR, f"X_test_fold{fold}.npy"), X_test)
+    np.save(os.path.join(SAVE_DIR, f"y_test_fold{fold}.npy"), y_test)
+
+    print(f"Fold {fold} 저장 완료: train {X_train.shape}, test {X_test.shape}")
