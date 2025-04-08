@@ -1,32 +1,36 @@
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import numpy as np
 from mne.decoding import CSP
 import os
 
+# ===== 설정 =====
 FOLD_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/fold_segment_fbcsp"
 SAVE_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/fbcsp_result"
+FEATURE_DIR = os.path.join(SAVE_DIR, "fbcsp_features")
 os.makedirs(SAVE_DIR, exist_ok=True)
+os.makedirs(FEATURE_DIR, exist_ok=True)
 
 N_FOLDS = 5
 N_CSP_COMPONENTS = 4
 
-acc_list, loss_list = [], []
+acc_list, auc_list = [], []
 all_features, all_labels = [], []
 
 for fold in range(N_FOLDS):
+    # ===== 데이터 불러오기 =====
     X_train = np.load(os.path.join(FOLD_DIR, f"X_train_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
     y_train = np.load(os.path.join(FOLD_DIR, f"y_train_fold{fold}.npy"), allow_pickle=True)
     X_test = np.load(os.path.join(FOLD_DIR, f"X_test_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
     y_test = np.load(os.path.join(FOLD_DIR, f"y_test_fold{fold}.npy"), allow_pickle=True)
 
-    N, B, C, T = X_train.shape  # 필터 뱅크 차원 B 있음
+    N, B, C, T = X_train.shape
     X_train_banks, X_test_banks = [], []
 
-    for b in range(B):  # 각 필터뱅크별 CSP
-        Xb_train = X_train[:, b]  # (N, C, T)
+    for b in range(B):
+        Xb_train = X_train[:, b]
         Xb_test = X_test[:, b]
 
         csp = CSP(n_components=N_CSP_COMPONENTS, reg=None, log=True, norm_trace=False)
@@ -36,21 +40,29 @@ for fold in range(N_FOLDS):
         X_train_banks.append(Xb_train_csp)
         X_test_banks.append(Xb_test_csp)
 
+    # ===== FBCSP 결과 병합 =====
     X_train_concat = np.concatenate(X_train_banks, axis=1)
     X_test_concat = np.concatenate(X_test_banks, axis=1)
 
+    # ===== 저장 (GCN 등 이후 작업용) =====
+    np.save(os.path.join(FEATURE_DIR, f"X_train_fbcsp_fold{fold}.npy"), X_train_concat)
+    np.save(os.path.join(FEATURE_DIR, f"X_test_fbcsp_fold{fold}.npy"), X_test_concat)
+    np.save(os.path.join(FEATURE_DIR, f"y_train_fold{fold}.npy"), y_train)
+    np.save(os.path.join(FEATURE_DIR, f"y_test_fold{fold}.npy"), y_test)
+
+    # ===== LDA =====
     clf = LDA()
     clf.fit(X_train_concat, y_train)
     preds = clf.predict(X_test_concat)
-    probs = clf.predict_proba(X_test_concat)
+    probs = clf.predict_proba(X_test_concat)[:, 1]  # class 1에 대한 확률
 
     acc = accuracy_score(y_test, preds)
-    loss = log_loss(y_test, probs)
+    auc = roc_auc_score(y_test, probs)
 
     acc_list.append(acc)
-    loss_list.append(loss)
+    auc_list.append(auc)
 
-    print(f"[Fold {fold+1}] Accuracy: {acc:.4f} | Log Loss: {loss:.4f}")
+    print(f"[Fold {fold+1}] Accuracy: {acc:.4f} | AUC: {auc:.4f}")
 
     all_features.append(X_test_concat)
     all_labels.append(y_test)
@@ -72,18 +84,19 @@ plt.tight_layout()
 plt.savefig(os.path.join(SAVE_DIR, "tsne_fbcsp_lda_subjectwise.png"))
 plt.show()
 
-# ===== Log Loss Bar Plot =====
+# ===== AUC Bar Plot =====
 plt.figure(figsize=(8, 5))
-plt.bar(range(1, N_FOLDS + 1), loss_list, color='mediumseagreen')
+plt.bar(range(1, N_FOLDS + 1), auc_list, color='skyblue')
 plt.xlabel("Fold")
-plt.ylabel("Log Loss")
-plt.title("Fold-wise Log Loss - FBCSP+LDA (Subject Split)")
+plt.ylabel("AUC")
+plt.title("Fold-wise AUC - FBCSP+LDA (Subject Split)")
 plt.xticks(range(1, N_FOLDS + 1))
-plt.ylim(0, max(loss_list) * 1.1)
+plt.ylim(0.5, 1.05)
 plt.grid(axis='y')
 plt.tight_layout()
-plt.savefig(os.path.join(SAVE_DIR, "log_loss_fbcsp_lda_subjectwise.png"))
+plt.savefig(os.path.join(SAVE_DIR, "auc_fbcsp_lda_subjectwise.png"))
 plt.show()
 
+# ===== 최종 결과 출력 =====
 print(f"\n✅ FBCSP+LDA 평균 정확도: {np.mean(acc_list):.4f} ± {np.std(acc_list):.4f}")
-print(f"✅ FBCSP+LDA 평균 Log Loss: {np.mean(loss_list):.4f} ± {np.std(loss_list):.4f}")
+print(f"✅ FBCSP+LDA 평균 AUC: {np.mean(auc_list):.4f} ± {np.std(auc_list):.4f}")
