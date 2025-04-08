@@ -1,0 +1,80 @@
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+import numpy as np
+from mne.decoding import CSP
+import os
+
+# ===== 설정 =====
+FOLD_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/fold_segment_data"
+SAVE_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/csp_lda_result"
+os.makedirs(SAVE_DIR, exist_ok=True)
+n_folds = 5
+
+acc_list = []
+auc_list = []
+all_features = []
+all_labels = []
+
+for fold in range(n_folds):
+    X_train = np.load(os.path.join(FOLD_DIR, f"X_train_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
+    y_train = np.load(os.path.join(FOLD_DIR, f"y_train_fold{fold}.npy"), allow_pickle=True)
+    X_test = np.load(os.path.join(FOLD_DIR, f"X_test_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
+    y_test = np.load(os.path.join(FOLD_DIR, f"y_test_fold{fold}.npy"), allow_pickle=True)
+
+    # CSP
+    csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
+    X_train_csp = csp.fit_transform(X_train, y_train)
+    X_test_csp = csp.transform(X_test)
+
+    # LDA
+    clf = LDA()
+    clf.fit(X_train_csp, y_train)
+    y_pred = clf.predict(X_test_csp)
+    y_prob = clf.predict_proba(X_test_csp)[:, 1]  # class 1 확률
+
+    acc = accuracy_score(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_prob)
+
+    acc_list.append(acc)
+    auc_list.append(auc)
+
+    print(f"[Fold {fold+1}] Accuracy: {acc:.4f} | AUC: {auc:.4f}")
+
+    all_features.append(X_test_csp)
+    all_labels.append(y_test)
+
+# ===== t-SNE 시각화 =====
+features = np.concatenate(all_features)
+labels = np.concatenate(all_labels)
+tsne = TSNE(n_components=2, random_state=42)
+X_tsne = tsne.fit_transform(features)
+
+plt.figure(figsize=(6, 6))
+for label in np.unique(labels):
+    idx = labels == label
+    plt.scatter(X_tsne[idx, 0], X_tsne[idx, 1], label=f"Class {label}", alpha=0.6)
+plt.legend()
+plt.title("t-SNE of CSP+LDA Features (Subject-level 5-Fold)")
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(os.path.join(SAVE_DIR, "tsne_csp_lda_subjectwise.png"))
+plt.show()
+
+# ===== AUC Bar Plot =====
+plt.figure(figsize=(8, 5))
+plt.bar(range(1, n_folds + 1), auc_list, color='skyblue')
+plt.xlabel("Fold")
+plt.ylabel("AUC")
+plt.title("Fold-wise AUC - CSP+LDA (Subject Split)")
+plt.xticks(range(1, n_folds + 1))
+plt.ylim(0.5, 1.05)
+plt.grid(axis='y')
+plt.tight_layout()
+plt.savefig(os.path.join(SAVE_DIR, "auc_csp_lda_subjectwise.png"))
+plt.show()
+
+# ===== 결과 출력 =====
+print(f"\n✅ CSP+LDA 평균 정확도: {np.mean(acc_list):.4f} ± {np.std(acc_list):.4f}")
+print(f"✅ CSP+LDA 평균 AUC: {np.mean(auc_list):.4f} ± {np.std(auc_list):.4f}")
