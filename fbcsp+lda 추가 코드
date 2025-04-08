@@ -1,0 +1,89 @@
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from sklearn.metrics import accuracy_score, log_loss
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+import numpy as np
+from mne.decoding import CSP
+import os
+
+FOLD_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/fold_segment_fbcsp"
+SAVE_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/fbcsp_result"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+N_FOLDS = 5
+N_CSP_COMPONENTS = 4
+
+acc_list, loss_list = [], []
+all_features, all_labels = [], []
+
+for fold in range(N_FOLDS):
+    X_train = np.load(os.path.join(FOLD_DIR, f"X_train_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
+    y_train = np.load(os.path.join(FOLD_DIR, f"y_train_fold{fold}.npy"), allow_pickle=True)
+    X_test = np.load(os.path.join(FOLD_DIR, f"X_test_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
+    y_test = np.load(os.path.join(FOLD_DIR, f"y_test_fold{fold}.npy"), allow_pickle=True)
+
+    N, B, C, T = X_train.shape  # 필터 뱅크 차원 B 있음
+    X_train_banks, X_test_banks = [], []
+
+    for b in range(B):  # 각 필터뱅크별 CSP
+        Xb_train = X_train[:, b]  # (N, C, T)
+        Xb_test = X_test[:, b]
+
+        csp = CSP(n_components=N_CSP_COMPONENTS, reg=None, log=True, norm_trace=False)
+        Xb_train_csp = csp.fit_transform(Xb_train, y_train)
+        Xb_test_csp = csp.transform(Xb_test)
+
+        X_train_banks.append(Xb_train_csp)
+        X_test_banks.append(Xb_test_csp)
+
+    X_train_concat = np.concatenate(X_train_banks, axis=1)
+    X_test_concat = np.concatenate(X_test_banks, axis=1)
+
+    clf = LDA()
+    clf.fit(X_train_concat, y_train)
+    preds = clf.predict(X_test_concat)
+    probs = clf.predict_proba(X_test_concat)
+
+    acc = accuracy_score(y_test, preds)
+    loss = log_loss(y_test, probs)
+
+    acc_list.append(acc)
+    loss_list.append(loss)
+
+    print(f"[Fold {fold+1}] Accuracy: {acc:.4f} | Log Loss: {loss:.4f}")
+
+    all_features.append(X_test_concat)
+    all_labels.append(y_test)
+
+# ===== t-SNE 시각화 =====
+features = np.concatenate(all_features)
+labels = np.concatenate(all_labels)
+tsne = TSNE(n_components=2, random_state=42)
+X_tsne = tsne.fit_transform(features)
+
+plt.figure(figsize=(6, 6))
+for label in np.unique(labels):
+    idx = labels == label
+    plt.scatter(X_tsne[idx, 0], X_tsne[idx, 1], label=f"Class {label}", alpha=0.6)
+plt.legend()
+plt.title("t-SNE of FBCSP+LDA Features (Subject-wise CV)")
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(os.path.join(SAVE_DIR, "tsne_fbcsp_lda_subjectwise.png"))
+plt.show()
+
+# ===== Log Loss Bar Plot =====
+plt.figure(figsize=(8, 5))
+plt.bar(range(1, N_FOLDS + 1), loss_list, color='mediumseagreen')
+plt.xlabel("Fold")
+plt.ylabel("Log Loss")
+plt.title("Fold-wise Log Loss - FBCSP+LDA (Subject Split)")
+plt.xticks(range(1, N_FOLDS + 1))
+plt.ylim(0, max(loss_list) * 1.1)
+plt.grid(axis='y')
+plt.tight_layout()
+plt.savefig(os.path.join(SAVE_DIR, "log_loss_fbcsp_lda_subjectwise.png"))
+plt.show()
+
+print(f"\n✅ FBCSP+LDA 평균 정확도: {np.mean(acc_list):.4f} ± {np.std(acc_list):.4f}")
+print(f"✅ FBCSP+LDA 평균 Log Loss: {np.mean(loss_list):.4f} ± {np.std(loss_list):.4f}")
