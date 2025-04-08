@@ -1,5 +1,5 @@
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,38 +9,47 @@ import os
 # ===== 설정 =====
 FOLD_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/fold_segment_data"
 SAVE_DIR = "C:/Users/mimi0/OneDrive/바탕 화면/csp_lda_result"
+CSP_FEATURE_DIR = os.path.join(SAVE_DIR, "csp_features")
 os.makedirs(SAVE_DIR, exist_ok=True)
-n_folds = 5
+os.makedirs(CSP_FEATURE_DIR, exist_ok=True)
 
+n_folds = 5
 acc_list = []
-loss_list = []
+auc_list = []
 all_features = []
 all_labels = []
 
 for fold in range(n_folds):
+    # ===== 데이터 불러오기 =====
     X_train = np.load(os.path.join(FOLD_DIR, f"X_train_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
     y_train = np.load(os.path.join(FOLD_DIR, f"y_train_fold{fold}.npy"), allow_pickle=True)
     X_test = np.load(os.path.join(FOLD_DIR, f"X_test_fold{fold}.npy"), allow_pickle=True).astype(np.float64)
     y_test = np.load(os.path.join(FOLD_DIR, f"y_test_fold{fold}.npy"), allow_pickle=True)
 
-    # CSP
+    # ===== CSP =====
     csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
     X_train_csp = csp.fit_transform(X_train, y_train)
     X_test_csp = csp.transform(X_test)
 
-    # LDA
+    # ===== 저장 (GCN 등 이후 작업용) =====
+    np.save(os.path.join(CSP_FEATURE_DIR, f"X_train_csp_fold{fold}.npy"), X_train_csp)
+    np.save(os.path.join(CSP_FEATURE_DIR, f"X_test_csp_fold{fold}.npy"), X_test_csp)
+    np.save(os.path.join(CSP_FEATURE_DIR, f"y_train_fold{fold}.npy"), y_train)
+    np.save(os.path.join(CSP_FEATURE_DIR, f"y_test_fold{fold}.npy"), y_test)
+
+    # ===== LDA =====
     clf = LDA()
     clf.fit(X_train_csp, y_train)
     y_pred = clf.predict(X_test_csp)
-    y_prob = clf.predict_proba(X_test_csp)
+    y_prob = clf.predict_proba(X_test_csp)[:, 1]  # class 1 확률
 
     acc = accuracy_score(y_test, y_pred)
-    loss = log_loss(y_test, y_prob)
+    auc = roc_auc_score(y_test, y_prob)
 
     acc_list.append(acc)
-    loss_list.append(loss)
+    auc_list.append(auc)
 
-    print(f"[Fold {fold+1}] Accuracy: {acc:.4f} | Log Loss: {loss:.4f}")
+    print(f"[Fold {fold+1}] Accuracy: {acc:.4f} | AUC: {auc:.4f}")
 
     all_features.append(X_test_csp)
     all_labels.append(y_test)
@@ -62,20 +71,19 @@ plt.tight_layout()
 plt.savefig(os.path.join(SAVE_DIR, "tsne_csp_lda_subjectwise.png"))
 plt.show()
 
-# ===== Log Loss Bar Plot =====
+# ===== AUC Bar Plot =====
 plt.figure(figsize=(8, 5))
-plt.bar(range(1, n_folds + 1), loss_list, color='salmon')
+plt.bar(range(1, n_folds + 1), auc_list, color='skyblue')
 plt.xlabel("Fold")
-plt.ylabel("Log Loss")
-plt.title("Fold-wise Log Loss - CSP+LDA (Subject Split)")
+plt.ylabel("AUC")
+plt.title("Fold-wise AUC - CSP+LDA (Subject Split)")
 plt.xticks(range(1, n_folds + 1))
-plt.ylim(0, max(loss_list) * 1.1)
+plt.ylim(0.5, 1.05)
 plt.grid(axis='y')
 plt.tight_layout()
-plt.savefig(os.path.join(SAVE_DIR, "log_loss_csp_lda_subjectwise.png"))
+plt.savefig(os.path.join(SAVE_DIR, "auc_csp_lda_subjectwise.png"))
 plt.show()
 
-# ===== 결과 출력 =====
+# ===== 최종 결과 출력 =====
 print(f"\n✅ CSP+LDA 평균 정확도: {np.mean(acc_list):.4f} ± {np.std(acc_list):.4f}")
-print(f"✅ CSP+LDA 평균 Log Loss: {np.mean(loss_list):.4f} ± {np.std(loss_list):.4f}")
-
+print(f"✅ CSP+LDA 평균 AUC: {np.mean(auc_list):.4f} ± {np.std(auc_list):.4f}")
